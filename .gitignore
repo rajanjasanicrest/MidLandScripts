@@ -1,0 +1,10 @@
+venv/
+.env
+
+
+files/
+deliever/
+
+consolidate/
+cleaned_files/
+
