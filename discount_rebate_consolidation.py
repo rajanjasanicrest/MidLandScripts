@@ -1,15 +1,17 @@
 import pandas as pd
-import os 
+import os
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import Alignment, PatternFill
 from openpyxl.utils import get_column_letter
+from tqdm import tqdm
+from collections import defaultdict
 from handler.handler import extract_supplier_name
 
 # All Folder location information 
-FILES_FOLDER_LOCATION = "./files"
+FILES_FOLDER_LOCATION = "./files round 2"
 CLEANED_FILES_FOLDER_LOCATION = "./cleaned_files/discount_rebate"
-CONSOLIDATED_FILE_LOCATION = "./consolidate"
+CONSOLIDATED_FILE_LOCATION = "./new"
 CONSOLIDATE_FILE_NAME = "discount_rebate_consolidate"
 
 # OUTPUT Files related information 
@@ -90,20 +92,27 @@ def cleanup_files():
     """
     # Read all files in the directory
     files = os.listdir(FILES_FOLDER_LOCATION)
+    files2 = os.listdir("./files")
+
+    all_files = files + files2
     
-    for item in files:
+    for item in all_files:
         # if not item.endswith(('.xlsx', '.xls')):
         #     continue
             
         print("Processing excel sheet --------------------------------------------")
-        print(f"./files/{item}")
+        print(f"./files round 2/{item}")
 
         cleaned_excel_file_name = f"{item.split('.')[0]}_cleaned.xlsx"
         cleaned_file_path = os.path.join(CLEANED_FILES_FOLDER_LOCATION, cleaned_excel_file_name)
         os.makedirs(CLEANED_FILES_FOLDER_LOCATION, exist_ok=True)
 
         try:
-            df = pd.read_excel(f"{FILES_FOLDER_LOCATION}/{item}", sheet_name="5. Disc, cond & rebate bidsheet")
+            if item in files:
+                df = pd.read_excel(f"{FILES_FOLDER_LOCATION}/{item}", sheet_name="5. Disc, cond & rebate bidsheet")
+            else:
+                df = pd.read_excel(f"./files/{item}", sheet_name="5. Disc, cond & rebate bidsheet")
+
         except Exception as e:
             print(f"Failed to read sheet from {item}: {e}")
             continue
@@ -228,7 +237,7 @@ def extract_discount_data(df):
             
             # If no end found, take reasonable number of rows
             if discount_end_row_index is None:
-                discount_end_row_index = min(discount_start_row_index + 20, len(df))
+                discount_end_row_index = min(discount_start_row_index + 25, len(df))
 
         if discount_start_row_index is not None:
             # Extract data from columns 1 to 4 (0-indexed)
@@ -335,9 +344,8 @@ def create_consolidated_dataset_rowwise(all_data, common_columns, supplier_colum
         
         # Extract supplier name
         try:
-            supplier_user_information = extract_supplier_name(file_name)
-            supplier_name = supplier_user_information[1] if len(supplier_user_information) > 1 else file_name
-            supplier_name = supplier_name.replace("_cleaned", "")
+            supplier_name = file_name.split('--')[-1].strip()
+            supplier_name = supplier_name.replace("_cleaned", "").replace(" R2", "").strip()
         except:
             supplier_name = file_name.replace("_cleaned", "")
         
@@ -474,19 +482,49 @@ def process_cleaned_files():
     try:
         # Make sure consolidated folder exists
         os.makedirs(CONSOLIDATED_FILE_LOCATION, exist_ok=True)
-        
+
         if not os.path.exists(CLEANED_FILES_FOLDER_LOCATION):
             print(f"Cleaned files folder does not exist: {CLEANED_FILES_FOLDER_LOCATION}")
             return
-            
-        cleaned_files = os.listdir(CLEANED_FILES_FOLDER_LOCATION)
-        excel_files = [f for f in cleaned_files if f.endswith(('.xlsx', '.xls'))]
 
-        if not excel_files:
-            print("No Excel files found in the cleaned files folder!")
-            return
-    
-        print(f"Found {len(excel_files)} Excel files to process")
+        cleaned_files = os.listdir(CLEANED_FILES_FOLDER_LOCATION)
+
+        # Group files by supplier name (normalized)
+        supplier_files = defaultdict(dict)
+        used_r1 = []
+        used_r2 = []
+
+        for f in cleaned_files:
+            if not f.endswith(('.xlsx', '.xls')):
+                continue
+
+            base = f.replace("_cleaned.xlsx", "")
+            is_r2 = "R2" in base
+
+            # Normalize supplier key (remove " R2" if present)
+            supplier_key = base.replace(" R2", "")
+
+            if is_r2:
+                supplier_files[supplier_key]['R2'] = f
+            else:
+                supplier_files[supplier_key]['R1'] = f
+
+        # Prefer R2 if available
+        excel_files = []
+        for supplier, files in supplier_files.items():
+            if files.get('R2'):
+                excel_files.append(files['R2'])
+                used_r2.append(supplier)
+            elif files.get('R1'):
+                excel_files.append(files['R1'])
+                used_r1.append(supplier)
+
+        print(f"\n✔️ Total unique suppliers considered: {len(supplier_files)}")
+        print(f"   - From R2: {len(used_r2)} suppliers")
+        print(f"   - From R1 (fallback): {len(used_r1)} suppliers")
+        missing_suppliers = set(supplier_files.keys()) - set(used_r1) - set(used_r2)
+        if missing_suppliers:
+            print(f"⚠️ Warning: {len(missing_suppliers)} suppliers had neither R1 nor R2: {missing_suppliers}")
 
         # Dictionary to store all sheet data
         all_sheet_data = {}
@@ -496,41 +534,30 @@ def process_cleaned_files():
             print(f"\n{'='*60}")
             print(f"Processing sheet type: {sheet_name}")
             print(f"{'='*60}")
-            
+
             # Get column configuration for this sheet type
             common_columns, supplier_columns = get_sheet_column_config(sheet_name)
-            
+
             if not common_columns and not supplier_columns:
                 print(f"No column configuration found for sheet: {sheet_name}")
                 continue
-            
+
             # Dictionary to store all data from files for this sheet type
             all_data = {}
 
-            for item in excel_files: 
-                print(f"Processing file: {item} - Sheet: {sheet_name}")
+            for item in tqdm(excel_files, desc=f"Reading {sheet_name}"):
                 file_path = os.path.join(CLEANED_FILES_FOLDER_LOCATION, item)
 
                 try: 
-                    # Read the specific sheet from the Excel file 
                     df = pd.read_excel(file_path, sheet_name=sheet_name)
-                    
-                    # Apply decimal formatting to the dataframe
                     df = format_dataframe_decimals(df)
-
-                    # Store the dataframe for later use
                     file_name_key = os.path.splitext(item)[0]  # Remove extension
                     all_data[file_name_key] = df
-
-                    print(f"Successfully loaded {len(df)} rows from {item} - {sheet_name}")
-                    if not df.empty:
-                        print(f"Columns in file: {list(df.columns)}")
-                
                 except Exception as e: 
                     print(f"Error processing {item} - {sheet_name}: {str(e)}")
                     all_data[os.path.splitext(item)[0]] = None
                     continue
-            
+
             if not any(df is not None and not df.empty for df in all_data.values()):
                 print(f"No valid data found for sheet type: {sheet_name}")
                 all_sheet_data[sheet_name] = {
@@ -539,49 +566,43 @@ def process_cleaned_files():
                     'supplier_columns': supplier_columns
                 }
                 continue
-            
-            # Create consolidated dataset for this sheet type in row-wise format
+
             print(f"\nCreating consolidated dataset for {sheet_name} in row-wise format...")
             consolidated_data = create_consolidated_dataset_rowwise(all_data, common_columns, supplier_columns)
-            
-            # Store sheet data for combined Excel creation
+
             all_sheet_data[sheet_name] = {
                 'consolidated_data': consolidated_data,
                 'common_columns': common_columns,
                 'supplier_columns': supplier_columns
             }
-            
+
             print(f"Total rows created for {sheet_name}: {len(consolidated_data)}")
-        
-        # Create single combined Excel file with all sheets in row-wise format
+
         output_file = f"{CONSOLIDATED_FILE_LOCATION}/{CONSOLIDATE_FILE_NAME}.xlsx"
         print(f"\n{'='*60}")
         print(f"Creating combined consolidated Excel file: {output_file}")
         print(f"{'='*60}")
-        
+
         create_combined_consolidated_excel_rowwise(all_sheet_data, output_file)
-        
+
         print(f"\n{'='*60}")
         print("Combined consolidated file created successfully!")
         print(f"File saved: {output_file}")
         print(f"Sheets included: {list(all_sheet_data.keys())}")
-        
-        # Print summary of rows per sheet
         for sheet_name, sheet_info in all_sheet_data.items():
             row_count = len(sheet_info['consolidated_data'])
             print(f"  - {sheet_name}: {row_count} rows")
-        
         print(f"{'='*60}")
-        
+
     except Exception as e: 
         print(f"Error in process_cleaned_files: {str(e)}")
         import traceback
         traceback.print_exc()
 
+
 if __name__ == "__main__":
-    # First clean up the raw files
     print("Starting file cleanup process...")
-    cleanup_files()
-    
+    # cleanup_files()
+
     print("\nStarting consolidation process...")
     process_cleaned_files()

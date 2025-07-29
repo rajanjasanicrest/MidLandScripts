@@ -16,6 +16,11 @@ from scipy import stats
 
 ALL_FILES = [
     {
+        "consolidation_folder": "bidsheet_other_metal",
+        "consolidate_file_name": "bidsheet_other_metal_outlier_consolidate",
+        "sheet_name": "3. Bidsheet Other Metals",
+    },
+    {
         "consolidation_folder": "bidsheet_steel", 
         "consolidate_file_name": "bidsheet_steel_outlier_consolidate", 
         "sheet_name": "2. Bidsheet Steel",
@@ -25,17 +30,13 @@ ALL_FILES = [
         "consolidate_file_name": "bidsheet_brass_outlier_consolidate",  
         "sheet_name": "1. Bidsheet Brass",
     }, 
-    {
-        "consolidation_folder": "bidsheet_other_metal",
-        "consolidate_file_name": "bidsheet_other_metal_outlier_consolidate",
-        "sheet_name": "3. Bidsheet Other Metals",
-    }
 ]
 
 for main_files_name_information in ALL_FILES:
 
     # All Folder location information 
     FILES_FOLDER_LOCATION = "./files"
+    R2_FILES_FOLDER_LOCATION = "./files round 2"
     CLEANED_FILES_FOLDER_LOCATION = f"./cleaned_files/{main_files_name_information['consolidation_folder']}"
     CONSOLIDATED_FILE_LOCATION = "./consolidate"
     CONSOLIDATE_FILE_NAME = main_files_name_information["consolidate_file_name"]
@@ -44,17 +45,17 @@ for main_files_name_information in ALL_FILES:
     OUTLIER_FILL = PatternFill(start_color='87CEEB', end_color='87CEEB', fill_type='solid')
 
     # Column name related information 
-    CONSOLIDATED_COMMON_COLUMN_NAMES = ["ROW ID #", "Division", 'Part #', "Item Description "]
-    SUPPLIER_COLUMNS_NAMES = ["Price per UOM EXW (USD)", 
-        "Freight Cost per UOM to Port of Origin/Departure (USD)", 
+    CONSOLIDATED_COMMON_COLUMN_NAMES = ["ROW ID #", "Division", 'Part #', "Item Description", "Product Group", "Part Family", "Average Order Quantity (per UOM)","Min Order Quantity (per UOM)","Max Order Quantity (per UOM)", "Order frequency",	"Annual Volume (per UOM)" ]
+
+    ROW_KEY_COLUMNS = ["ROW ID #", "Division", 'Part #', "Item Description"]
+
+    SUPPLIER_COLUMNS_NAMES = [
         "Total Cost Per UOM FOB Port of Origin/Departure (USD)",
-        "Additional information (please use this column only if absolutely necessary)"
     ]
-    BASE_SUPPLIER_COLUMNS = ["Price per UOM EXW (USD)", 
-        "Freight Cost per UOM to Port of Origin/Departure (USD)", 
+    BASE_SUPPLIER_COLUMNS = [
         "Total Cost Per UOM FOB Port of Origin/Departure (USD)"
     ]
-    ADDITIONAL_INFO_COLUMN = "Additional information (please use this column only if absolutely necessary)"
+    ADDITIONAL_INFO_COLUMN = "DONOTCONSIDER"
 
     NUMERIC_COLUMNS = [
         "Price per UOM EXW (USD)", 
@@ -91,9 +92,7 @@ for main_files_name_information in ALL_FILES:
     def is_numeric_column(column_name):
         return column_name in NUMERIC_COLUMNS
 
-    # All files fetch from files folder -------------------------------------
     # files = os.listdir(FILES_FOLDER_LOCATION)
-
     # for item in files: 
         
     #     print("Processing excel sheet ---------------------------------------")
@@ -102,6 +101,35 @@ for main_files_name_information in ALL_FILES:
     #     cleaned_csv_file_name = f"{item.split('.')[0]}_cleaned.xlsx"
     #     os.makedirs(CLEANED_FILES_FOLDER_LOCATION, exist_ok=True)
     #     df = pd.read_excel(f"./files/{item}", main_files_name_information["sheet_name"], header=None)
+    #     header_row_index = None
+    #     col_start_index = None
+    #     for index, row in df.iterrows():
+    #         for col_index, value in enumerate(row):
+    #             if isinstance(value, str) and "ROW ID #" in value:
+    #                 header_row_index = index
+    #                 col_start_index = col_index
+    #                 break
+    #         if header_row_index is not None:
+    #             break
+    #     if header_row_index is not None and col_start_index is not None:
+    #         headers = df.iloc[header_row_index, col_start_index:].tolist()
+            
+    #         data_rows = df.iloc[header_row_index + 1:, col_start_index:]
+    #         data_rows.columns = headers
+    #         data_rows.reset_index(drop=True, inplace=True)
+    #         data_rows.to_excel(f"{CLEANED_FILES_FOLDER_LOCATION}/{cleaned_csv_file_name}", index=False)
+    #         print(f"Data saved to '{CLEANED_FILES_FOLDER_LOCATION}/{cleaned_csv_file_name}'")
+    #     else:
+    #         print("No row containing 'ROW ID #' was found.")
+
+    # round2files = os.listdir(R2_FILES_FOLDER_LOCATION)
+    # for item in round2files:
+    #     print("Processing Round 2 excel sheets ---------------------------------------")
+    #     print(f"./files/{item}")
+
+    #     cleaned_csv_file_name = f"{item.split('.')[0]}_r2_cleaned.xlsx"
+    #     os.makedirs(CLEANED_FILES_FOLDER_LOCATION, exist_ok=True)
+    #     df = pd.read_excel(f"./files round 2/{item}", main_files_name_information["sheet_name"], header=None)
     #     header_row_index = None
     #     col_start_index = None
     #     for index, row in df.iterrows():
@@ -161,6 +189,7 @@ for main_files_name_information in ALL_FILES:
         for file_name in file_names:
             supplier_info = row_data['supplier_data'].get(file_name, {})
             supplier_columns = get_supplier_columns(file_name, suppliers_with_additional_info)
+            supplier_columns = [s for s in supplier_columns if 'R2' in s]
             has_valid_data = False
             for col_name in supplier_columns:
                 value = supplier_info.get(col_name, "")
@@ -171,39 +200,105 @@ for main_files_name_information in ALL_FILES:
                 valid_count += 1
         return valid_count
 
-    def create_consolidated_dataset(all_data, suppliers_with_additional_info):
+    from collections import defaultdict
+
+    def create_consolidated_dataset(all_data, suppliers_with_additional_info, display_names):
         consolidated_rows = {}
-        for file_name, df in all_data.items():
-            print(f"Processing data from {file_name}...")
-            supplier_columns = get_supplier_columns(file_name, suppliers_with_additional_info)
+
+        # Track which supplier has R1 and/or R2
+        supplier_rounds_map = defaultdict(set)
+        supplier_columns_map = {}  # base_name -> column list from either R1 or R2
+
+        for file_key, df in all_data.items():
+            print(f"Processing data from {file_key}...")
+
+            df.columns = [str(col).strip() for col in df.columns]
+
+            is_r2 = "_r2" in file_key.lower()
+            round_label = "R2" if is_r2 else "R1"
+
+            base_name = (
+                file_key.split('--')[-1]
+                .replace('R2_r2_cleaned', '')
+                .replace('_cleaned', '')
+                .strip()
+            )
+
+            pretty_supplier_key = f"{base_name} - {round_label}"
+
+            supplier_rounds_map[base_name].add(round_label)
+
+            supplier_columns = get_supplier_columns(file_key, suppliers_with_additional_info)
+            supplier_columns_map[base_name] = supplier_columns  # latest seen is fine
+
             for _, row in df.iterrows():
                 row_key_parts = []
                 common_data = {}
-                for col in CONSOLIDATED_COMMON_COLUMN_NAMES:
+                for col in ROW_KEY_COLUMNS:
                     if col in df.columns:
-                        value = str(row[col]) if pd.notna(row[col]) else ""
-                        row_key_parts.append(value)
-                        common_data[col] = row[col] if pd.notna(row[col]) else ""
+                        value = row[col]
+                        # Standardize: convert to string, strip whitespace, handle NaN/missing
+                        if pd.isna(value) or str(value).strip().lower() in ["", "nan", "none"]:
+                            clean_value = ""
+                        else:
+                            clean_value = str(value).strip()
+                        row_key_parts.append(clean_value)
+                        common_data[col] = clean_value
                     else:
                         row_key_parts.append("")
                         common_data[col] = ""
+                # Add the rest of CONSOLIDATED_COMMON_COLUMN_NAMES to common_data for Excel output
+                for col in CONSOLIDATED_COMMON_COLUMN_NAMES:
+                    if col not in ROW_KEY_COLUMNS:
+                        if col in df.columns:
+                            value = row[col]
+                            if pd.isna(value) or str(value).strip().lower() in ["", "nan", "none"]:
+                                clean_value = ""
+                            else:
+                                clean_value = str(value).strip()
+                            common_data[col] = clean_value
+                        else:
+                            common_data[col] = ""
                 row_key = "|".join(row_key_parts)
+
                 if row_key not in consolidated_rows:
                     consolidated_rows[row_key] = {
                         'common_data': common_data,
                         'supplier_data': {}
                     }
+
                 supplier_data = {}
                 for col in supplier_columns:
+                    full_col_name = f"{pretty_supplier_key} - {col}"
                     if col in df.columns:
-                        value = row[col] if pd.notna(row[col]) else ""
-                        if is_numeric_column(col):
-                            value = format_numeric_value(value)
-                        supplier_data[col] = value
+                        if pd.notna(row[col]):
+                            val = row[col]
+                            value = format_numeric_value(val) if is_numeric_column(col) else str(val)
+                        else:
+                            value = ""
+                        supplier_data[full_col_name] = value
                     else:
-                        supplier_data[col] = ""
-                consolidated_rows[row_key]['supplier_data'][file_name] = supplier_data
+                        supplier_data[full_col_name] = 0.0
+
+                consolidated_rows[row_key]['supplier_data'][pretty_supplier_key] = supplier_data
+
+        # 🔧 Post-process: Add empty R1 or R2 if missing
+        for row in consolidated_rows.values():
+            for base_name, rounds in supplier_rounds_map.items():
+                all_rounds = {"R1", "R2"}
+                missing_rounds = all_rounds - rounds
+
+                for missing_round in missing_rounds:
+                    pretty_supplier_key = f"{base_name} - {missing_round}"
+                    if pretty_supplier_key not in row['supplier_data']:
+                        empty_data = {}
+                        for col in supplier_columns_map.get(base_name, []):
+                            full_col_name = f"{pretty_supplier_key} - {col}"
+                            empty_data[full_col_name] = ""
+                        row['supplier_data'][pretty_supplier_key] = empty_data
+
         return consolidated_rows
+
 
     def has_valid_supplier_data(supplier_data):
         for value in supplier_data.values():
@@ -404,222 +499,206 @@ for main_files_name_information in ALL_FILES:
                 "std_dev": round(std_dev_val, 4)
             }
 
-    def create_consolidated_excel(consolidated_data, file_names, suppliers_with_additional_info):
-        # Build row-wise outlier lookup before creating Excel
-        rowwise_outlier_lookup = build_rowwise_outlier_lookup(consolidated_data, file_names, suppliers_with_additional_info)
-        
+    def create_consolidated_excel(consolidated_data, file_keys, suppliers_with_additional_info):
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, PatternFill
+        from openpyxl.utils import get_column_letter
+
         wb = Workbook()
         ws = wb.active
         ws.title = "Consolidated Suppliers"
+
+        wrap_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         light_gray_fill = PatternFill(start_color='D3D3D3', end_color='D3D3D3', fill_type='solid')
         white_fill = PatternFill(start_color='FFFFFF', end_color='FFFFFF', fill_type='solid')
         green_fill = PatternFill(start_color='90EE90', end_color='90EE90', fill_type='solid')
-        # >>>>> NEW STATISTICAL COLUMN FILLS <<<<<
-        yellow_fill = PatternFill(start_color='FFFF99', end_color='FFFF99', fill_type='solid')  # For statistical columns
-        wrap_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        # 🧱 Step 1: Gather all supplier full column names
+        all_supplier_columns = []
+
+        for row_data in consolidated_data.values():
+            for supplier_key, supplier_data in row_data['supplier_data'].items():
+                for col in supplier_data:
+                    if col not in all_supplier_columns:
+                        all_supplier_columns.append(col)
+            break  # Just check one row for keys (they're consistent)
+
+        # 🧱 Step 2: Write headers (2 rows)
         current_col = 1
-        supplier_index = 0
-        
-        # Common columns headers
+
+        # Row 1: Common column headers
         for col_name in CONSOLIDATED_COMMON_COLUMN_NAMES:
-            header_cell = ws.cell(row=1, column=current_col, value="")
-            header_cell.alignment = wrap_alignment
-            current_col += 1
-        
-        # Valid supplier column
-        valid_supplier_cell = ws.cell(row=1, column=current_col, value="")
-        valid_supplier_cell.alignment = wrap_alignment
-        valid_supplier_cell.fill = green_fill
-        current_col += 1
-        
-        # Supplier columns headers (moved before statistical columns)
-        for file_name in file_names:
-            supplier_user_information = extract_supplier_name(file_name)
-            supplier_name = supplier_user_information[1]
-            supplier_name = supplier_name.replace("_cleaned", "")
-            supplier_columns = get_supplier_columns(file_name, suppliers_with_additional_info)
-            background_fill = light_gray_fill if supplier_index % 2 == 0 else white_fill
-            for col_name in supplier_columns:
-                supplier_cell = ws.cell(row=1, column=current_col, value=supplier_name)
-                supplier_cell.alignment = wrap_alignment
-                supplier_cell.fill = background_fill
-                current_col += 1
-            supplier_index += 1
-        
-        # >>>>> NEW STATISTICAL COLUMNS HEADERS (NOW AT END) <<<<<
-        # Statistical columns headers (row 1)
-        stats_headers = ["Statistics", "Statistics", "Statistics"]
-        for header in stats_headers:
-            stats_cell = ws.cell(row=1, column=current_col, value=header)
-            stats_cell.alignment = wrap_alignment
-            stats_cell.fill = yellow_fill
-            current_col += 1
-        
-        # Second row headers
-        current_col = 1
-        for col_name in CONSOLIDATED_COMMON_COLUMN_NAMES:
-            header_cell = ws.cell(row=2, column=current_col, value=col_name)
-            header_cell.alignment = wrap_alignment
-            current_col += 1
-        
-        valid_supplier_header = ws.cell(row=2, column=current_col, value="Valid Supplier")
-        valid_supplier_header.alignment = wrap_alignment
-        valid_supplier_header.fill = green_fill
-        current_col += 1
-        
-        # Supplier columns sub-headers (moved before statistical columns)
-        supplier_index = 0
-        for file_name in file_names:
-            supplier_columns = get_supplier_columns(file_name, suppliers_with_additional_info)
-            background_fill = light_gray_fill if supplier_index % 2 == 0 else white_fill
-            for col_name in supplier_columns:
-                header_cell = ws.cell(row=2, column=current_col, value=col_name)
-                header_cell.alignment = wrap_alignment
-                header_cell.fill = background_fill
-                current_col += 1
-            supplier_index += 1
-        
-        # >>>>> NEW STATISTICAL COLUMNS SUB-HEADERS (NOW AT END) <<<<<
-        # Statistical columns sub-headers (row 2)
-        stats_sub_headers = ["Mean (Total Cost)", "Variance (Total Cost)", "Std Dev (Total Cost)"]
-        for sub_header in stats_sub_headers:
-            stats_sub_cell = ws.cell(row=2, column=current_col, value=sub_header)
-            stats_sub_cell.alignment = wrap_alignment
-            stats_sub_cell.fill = yellow_fill
+            ws.cell(row=1, column=current_col, value="").alignment = wrap_alignment
+            ws.cell(row=2, column=current_col, value=col_name).alignment = wrap_alignment
             current_col += 1
 
+        # Valid supplier count column
+        ws.cell(row=1, column=current_col, value="").alignment = wrap_alignment
+        ws.cell(row=2, column=current_col, value="Valid Supplier").alignment = wrap_alignment
+        ws.cell(row=2, column=current_col).fill = green_fill
+        current_col += 1
+
+        # Row 1 & 2: Supplier-specific headers
+        supplier_grouped = {}
+
+        from collections import defaultdict
+        # Group by base supplier, then split into R1 and R2
+        supplier_r1_r2_map = defaultdict(lambda: {"R1": [], "R2": []})
+
+        for col in all_supplier_columns:
+            parts = col.split(" - ")
+            if len(parts) >= 3:
+                base_supplier = parts[0].strip()
+                round_label = parts[1].strip()
+                if round_label in ["R1", "R2"]:
+                    supplier_r1_r2_map[base_supplier][round_label].append(col)
+
+        # Now sort supplier names alphabetically and flatten with R1 + R2 adjacent
+        supplier_grouped = {}
+        sorted_supplier_names = sorted(supplier_r1_r2_map.keys(), key=lambda x: x.lower())
+
+        for idx, supplier in enumerate(sorted_supplier_names):
+            r1_cols = supplier_r1_r2_map[supplier].get("R1", [])
+            r2_cols = supplier_r1_r2_map[supplier].get("R2", [])
+            if r1_cols:
+                supplier_grouped[f"{supplier} - R1"] = r1_cols
+            if r2_cols:
+                supplier_grouped[f"{supplier} - R2"] = r2_cols
+
+
+        for idx, (supplier_key, cols) in enumerate(supplier_grouped.items()):
+            background_fill = light_gray_fill if idx % 2 == 0 else white_fill
+            for col in cols:
+                ws.cell(row=1, column=current_col, value=supplier_key).alignment = wrap_alignment
+                ws.cell(row=1, column=current_col).fill = background_fill
+
+                ws.cell(row=2, column=current_col, value=" - ".join(col.split(" - ")[2:])).alignment = wrap_alignment
+                ws.cell(row=2, column=current_col).fill = background_fill
+
+                current_col += 1
+
+        # 🧱 Step 3: Fill data rows
         row_num = 3
         for row_key, row_data in consolidated_data.items():
             current_col = 1
-            
-            # Common data columns
-            for col_name in CONSOLIDATED_COMMON_COLUMN_NAMES:
-                data_cell = ws.cell(row=row_num, column=current_col, value=row_data['common_data'].get(col_name, ""))
-                data_cell.alignment = Alignment(wrap_text=True, vertical='top')
-                current_col += 1
-            
-            # Valid supplier count
-            valid_supplier_count = 0
-            for file_name in file_names:
-                supplier_info = row_data['supplier_data'].get(file_name, {})
-                if has_valid_supplier_data(supplier_info):
-                    valid_supplier_count += 1
-            valid_supplier_data_cell = ws.cell(row=row_num, column=current_col, value=valid_supplier_count)
-            valid_supplier_data_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            if valid_supplier_count > 0:
-                valid_supplier_data_cell.fill = green_fill
-            current_col += 1
-            
-            # Fill in supplier data row cells (moved before statistical columns)
-            sup_idx = 0
-            for file_name in file_names:
-                supplier_info = row_data['supplier_data'].get(file_name, {})
-                supplier_columns = get_supplier_columns(file_name, suppliers_with_additional_info)
-                for col_name in supplier_columns:
-                    cell_value = supplier_info.get(col_name, "")
-                    data_cell = ws.cell(row=row_num, column=current_col, value=cell_value)
-                    data_cell.alignment = Alignment(wrap_text=True, vertical='top')
-                    
-                    # >>>>> ROW-WISE OUTLIER COLORING <<<<<
-                    if is_numeric_column(col_name) and col_name in OUTLIER_NUMERIC_COLUMNS:
-                        # Check if this specific cell is marked as an outlier row-wise
-                        is_outlier = (
-                            row_key in rowwise_outlier_lookup and
-                            sup_idx in rowwise_outlier_lookup[row_key] and
-                            col_name in rowwise_outlier_lookup[row_key][sup_idx]
-                        )
-                        if is_outlier:
-                            data_cell.fill = OUTLIER_FILL
-                            print(f"Marked outlier: Row {row_num}, Supplier {sup_idx}, Column {col_name}, Value: {cell_value}")
-                    
-                    current_col += 1
-                sup_idx += 1
 
-            # >>>>> NEW STATISTICAL CALCULATIONS (NOW AT END) <<<<<
-            # Calculate statistics for "Total Cost Per UOM FOB Port of Origin/Departure (USD)"
-            target_column = "Total Cost Per UOM FOB Port of Origin/Departure (USD)"
-            stats = calculate_row_statistics(row_data, file_names, suppliers_with_additional_info, target_column)
-            
-            # Mean column
-            mean_cell = ws.cell(row=row_num, column=current_col, value=stats["mean"])
-            mean_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            mean_cell.fill = yellow_fill
+            # Write common columns
+            for col_name in CONSOLIDATED_COMMON_COLUMN_NAMES:
+                ws.cell(row=row_num, column=current_col, value=row_data['common_data'].get(col_name, "")).alignment = Alignment(wrap_text=True, vertical='top')
+                current_col += 1
+
+            # Count valid suppliers
+            valid_count = 0
+            from collections import defaultdict
+
+            # Create a mapping for supplier base names to their R1/R2 data
+            supplier_round_map = defaultdict(lambda: {"R1": {}, "R2": {}})
+
+            # Organize supplier data by base name and round
+            for supplier_key, supplier_data in row_data['supplier_data'].items():
+                if " - R1" in supplier_key:
+                    base = supplier_key.replace(" - R1", "")
+                    supplier_round_map[base]["R1"] = supplier_data
+                elif " - R2" in supplier_key:
+                    base = supplier_key.replace(" - R2", "")
+                    supplier_round_map[base]["R2"] = supplier_data
+
+            # Evaluate validity (prefer R2 if it has valid values, else R1)
+            for supplier, rounds in supplier_round_map.items():
+                r2_data = rounds["R2"]
+                r1_data = rounds["R1"]
+
+                if any(is_valid_supplier_value(v) for v in r2_data.values()):
+                    valid_count += 1
+                elif any(is_valid_supplier_value(v) for v in r1_data.values()):
+                    valid_count += 0
+
+            ws.cell(row=row_num, column=current_col, value=valid_count).alignment = Alignment(wrap_text=True, vertical='top')
+            if valid_count > 0:
+                ws.cell(row=row_num, column=current_col).fill = green_fill
             current_col += 1
-            
-            # Variance column
-            variance_cell = ws.cell(row=row_num, column=current_col, value=stats["variance"])
-            variance_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            variance_cell.fill = yellow_fill
-            current_col += 1
-            
-            # Standard deviation column
-            std_dev_cell = ws.cell(row=row_num, column=current_col, value=stats["std_dev"])
-            std_dev_cell.alignment = Alignment(wrap_text=True, vertical='top')
-            std_dev_cell.fill = yellow_fill
-            current_col += 1
-            
+
+            # Supplier data
+            for supplier_key, cols in supplier_grouped.items():
+                data = row_data['supplier_data'].get(supplier_key, {})
+                for full_col_name in cols:
+                    value = data.get(full_col_name, "")
+                    ws.cell(row=row_num, column=current_col, value=value).alignment = Alignment(wrap_text=True, vertical='top')
+                    current_col += 1
+
             row_num += 1
 
-        # Adjust column widths
-        total_columns = len(CONSOLIDATED_COMMON_COLUMN_NAMES) + 1 + 3  # +3 for new statistical columns
-        for file_name in file_names:
-            supplier_columns = get_supplier_columns(file_name, suppliers_with_additional_info)
-            total_columns += len(supplier_columns)
-        
-        for col_num in range(1, total_columns + 1):
-            column_letter = get_column_letter(col_num)
-            ws.column_dimensions[column_letter].width = 20
-        
-        ws.row_dimensions[1].height = 30
+        # 🧱 Step 4: Auto-set column widths
+        for col_num in range(1, ws.max_column + 1):
+            col_letter = get_column_letter(col_num)
+            ws.column_dimensions[col_letter].width = 20
+
+        ws.row_dimensions[1].height = 25
         ws.row_dimensions[2].height = 30
-        for row_num in range(3, ws.max_row + 1):
-            ws.row_dimensions[row_num].height = 30
-        
+        for r in range(3, ws.max_row + 1):
+            ws.row_dimensions[r].height = 30
+
         wb.save(OUTPUT_FILE)
+        print(f"[SUCCESS] Saved Excel file to: {OUTPUT_FILE}")
+
         
     def process_cleaned_files(): 
         try: 
             cleaned_files = os.listdir(CLEANED_FILES_FOLDER_LOCATION)
-            excel_files = [f for f in cleaned_files if f.endswith(('.xlsx', '.xls'))]
-            if not excel_files:
+            r1_excel_files = [f for f in cleaned_files if f.endswith(('.xlsx', '.xls')) and '_r2' not in f.lower() and 'NTC' not in f]
+            r2_excel_files = [f for f in cleaned_files if f.endswith(('.xlsx', '.xls')) and '_r2' in f.lower() and 'NTC' not in f]
+
+            if not r1_excel_files and not r2_excel_files:
                 print("No Excel files found in the cleaned files folder!")
                 return
-            print(f"Found {len(excel_files)} Excel files to process")
+            print(f"Found {len(r1_excel_files)} Round 1 and {len(r2_excel_files)} Round 2 Excel files")
 
-            all_data = {}
-            all_rows_data = []
-            
-            for item in excel_files:
-                print("Processing cleaned file ---------------------------------------")
+            all_data = {}       # {'giraffe_stainless_r1': df}
+            display_names = {}  # {'giraffe_stainless_r1': 'Original filename'}
+
+            # Load R1 files
+            for item in r1_excel_files:
                 file_path = os.path.join(CLEANED_FILES_FOLDER_LOCATION, item)
-                print(f"Processing: {file_path}")
                 try:
-                    df = pd.read_excel(file_path)
+                    df = pd.read_excel(file_path, engine='openpyxl')
+                    # df.columns = [str(col).strip() for col in df.columns]  # Normalize columns
                     file_name_key = os.path.splitext(item)[0]
                     all_data[file_name_key] = df
-                    print(f"Successfully loaded {len(df)} rows from {item}")
-                    print(f"Columns in file: {list(df.columns)}")
+                    print(f"[R1] Loaded {len(df)} rows from {item}")
                 except Exception as e:
-                    print(f"Error processing {item}: {str(e)}")
-                    continue
+                    print(f"[R1] Error processing {item}: {str(e)}")
+
+            # Load R2 files
+            for item in r2_excel_files:
+                file_path = os.path.join(CLEANED_FILES_FOLDER_LOCATION, item)
+                try:
+                    df = pd.read_excel(file_path, engine='openpyxl')
+                    # df.columns = [str(col).strip() for col in df.columns]  # Normalize columns
+                    file_name_key = os.path.splitext(item)[0]
+                    all_data[file_name_key] = df
+                    print(f"[R2] Loaded {len(df)} rows from {item}")
+                except Exception as e:
+                    print(f"[R2] Error processing {item}: {str(e)}")
+
             if not all_data:
                 print("No valid data found in any files!")
                 return
-            
+
             print("\nChecking for additional information data...")
             suppliers_with_additional_info = check_additional_info_data(all_data)
-            
+
             print(f"Suppliers with additional info: {suppliers_with_additional_info}")
             print("\nCreating consolidated dataset...")
-            consolidated_data = create_consolidated_dataset(all_data, suppliers_with_additional_info)
-            
+            consolidated_data = create_consolidated_dataset(all_data, suppliers_with_additional_info, display_names)
+
             print("Creating consolidated Excel file with row-wise outlier detection and statistical columns...")
             create_consolidated_excel(consolidated_data, list(all_data.keys()), suppliers_with_additional_info)
-            
+
             print(f"\nConsolidated file created: {OUTPUT_FILE}")
             print(f"Suppliers including additional info column: {len(suppliers_with_additional_info)}")
             print(f"Suppliers excluding additional info column: {len(all_data) - len(suppliers_with_additional_info)}")
             print("Added statistical columns: Mean, Variance, and Standard Deviation for Total Cost Per UOM")
+
         except Exception as e: 
             print(f"Error in process_cleaned_files: {str(e)}")
 

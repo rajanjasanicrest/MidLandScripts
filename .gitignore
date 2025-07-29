@@ -1,10 +1,16 @@
 venv/
 .env
 
-
 files/
+files round 2/
 deliever/
 
 consolidate/
 cleaned_files/
 
+*.xlsx
+*.csv
+
+legacy/
+
+output_excels/

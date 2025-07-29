@@ -45,6 +45,8 @@ for main_files_name_information in ALL_FILES:
 
     # Column name related information 
     CONSOLIDATED_COMMON_COLUMN_NAMES = ["ROW ID #", "Division", 'Part #', "Item Description ", "Product Group", "Part Family", "Average Order Quantity (per UOM)","Min Order Quantity (per UOM)","Max Order Quantity (per UOM)", "Order frequency",	"Annual Volume (per UOM)" ]
+
+    ROW_KEY_COLUMNS = ["ROW ID #", "Division", 'Part #', "Item Description "]
     SUPPLIER_COLUMNS_NAMES = [
         "Total Cost Per UOM FOB Port of Origin/Departure (USD)",
     ]

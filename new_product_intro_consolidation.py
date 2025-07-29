@@ -7,9 +7,9 @@ from openpyxl.utils import get_column_letter
 from handler.handler import extract_supplier_name
 
 # All Folder location information 
-FILES_FOLDER_LOCATION = "./files"
+FILES_FOLDER_LOCATION = "./files round 2"
 CLEANED_FILES_FOLDER_LOCATION = "./cleaned_files/new_product_intro"
-CONSOLIDATED_FILE_LOCATION = "./consolidate"
+CONSOLIDATED_FILE_LOCATION = "./new"
 CONSOLIDATE_FILE_NAME = "new_product_intro_consolidate"
 
 # Column name related information 
@@ -81,13 +81,16 @@ def cleanup_files():
     """
     # Read all files in the directory
     files = os.listdir(FILES_FOLDER_LOCATION)
+    files2 = os.listdir("./files")
+
+    all_files = files + files2
     
-    for item in files: 
+    for item in all_files: 
         # if not item.endswith(('.xlsx', '.xls')):
         #     continue
 
         print("Processing excel sheet ---------------------------------------")
-        print(f"./files/{item}")
+        print(f"./files round 2/{item}")
 
         # Cleaned csv file name 
         cleaned_csv_file_name = f"{item.split('.')[0]}_cleaned.xlsx"
@@ -96,8 +99,11 @@ def cleanup_files():
         os.makedirs(CLEANED_FILES_FOLDER_LOCATION, exist_ok=True)
 
         try:
-            # Read Excel file
-            df = pd.read_excel(f"./files/{item}", "6. New Product Intro Sharing", header=None)
+            if item in files:
+                df = pd.read_excel(f"{FILES_FOLDER_LOCATION}/{item}", sheet_name="6. New Product Intro Sharing")
+            else:
+                df = pd.read_excel(f"./files/{item}", sheet_name="6. New Product Intro Sharing")
+
         except Exception as e:
             print(f"Failed to read sheet from {item}: {e}")
             continue
@@ -151,9 +157,8 @@ def create_consolidated_dataset_rowwise(all_data):
         
         # Extract supplier name
         try:
-            supplier_user_information = extract_supplier_name(file_name)
-            supplier_name = supplier_user_information[1] if len(supplier_user_information) > 1 else file_name
-            supplier_name = supplier_name.replace("_cleaned", "")
+            supplier_name = file_name.split('--')[-1].strip()
+            supplier_name = supplier_name.replace("_cleaned", "").replace(" R2", "").strip()
         except:
             supplier_name = file_name.replace("_cleaned", "")
         
@@ -252,14 +257,47 @@ def process_cleaned_files():
             return
         
         # Reading cleaned files related csv files 
-        cleaned_files = os.listdir(CLEANED_FILES_FOLDER_LOCATION)
-        excel_files = [f for f in cleaned_files if f.endswith(('.xlsx', '.xls'))]
+        from collections import defaultdict
 
-        if not excel_files:
-            print("No Excel files found in the cleaned files folder!")
-            return
-    
-        print(f"Found {len(excel_files)} Excel files to process")
+        cleaned_files = os.listdir(CLEANED_FILES_FOLDER_LOCATION)
+
+        # Group files by supplier name (normalized)
+        supplier_files = defaultdict(dict)
+        used_r1 = []
+        used_r2 = []
+
+        for f in cleaned_files:
+            if not f.endswith(('.xlsx', '.xls')):
+                continue
+
+            base = f.replace("_cleaned.xlsx", "")
+            is_r2 = "R2" in base
+
+            # Normalize supplier key (remove " R2" if present)
+            supplier_key = base.replace(" R2", "")
+
+            if is_r2:
+                supplier_files[supplier_key]['R2'] = f
+            else:
+                supplier_files[supplier_key]['R1'] = f
+
+        # Prefer R2 if available
+        excel_files = []
+        for supplier, files in supplier_files.items():
+            if files.get('R2'):
+                excel_files.append(files['R2'])
+                used_r2.append(supplier)
+            elif files.get('R1'):
+                excel_files.append(files['R1'])
+                used_r1.append(supplier)
+
+        print(f"\n✔️ Total unique suppliers considered: {len(supplier_files)}")
+        print(f"   - From R2: {len(used_r2)} suppliers")
+        print(f"   - From R1 (fallback): {len(used_r1)} suppliers")
+        missing_suppliers = set(supplier_files.keys()) - set(used_r1) - set(used_r2)
+        if missing_suppliers:
+            print(f"⚠️ Warning: {len(missing_suppliers)} suppliers had neither R1 nor R2: {missing_suppliers}")
+
 
         # Dictionary to store all data from files
         all_data = {}
@@ -312,7 +350,7 @@ def process_cleaned_files():
 if __name__ == "__main__":
     # First clean up the raw files
     print("Starting file cleanup process...")
-    cleanup_files()
+    # cleanup_files()
     
     print("\nStarting consolidation process...")
     process_cleaned_files()

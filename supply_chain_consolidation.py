@@ -7,9 +7,9 @@ from openpyxl.utils import get_column_letter
 from handler.handler import extract_supplier_name
 
 # All Folder location information 
-FILES_FOLDER_LOCATION = "./files"
+FILES_FOLDER_LOCATION = "./files round 2"
 CLEANED_FILES_FOLDER_LOCATION = "./cleaned_files/supply_chain"
-CONSOLIDATED_FILE_LOCATION = "./consolidate"
+CONSOLIDATED_FILE_LOCATION = "./new"
 CONSOLIDATED_FILE_NAME = "supplier_chain_improve_bidsheet_consolidate"
 
 # Sheet names that we're processing
@@ -28,7 +28,10 @@ RETAILS_COMMON_COLUMN_NAMES = ["S#"]
 RETAILS_SUPPLIER_COLUMN_NAMES = [
     "Product secondary packaging", 
     "Secondary packaging label", 
-    "Product primary packaging"
+    "Product primary packaging",
+    "Primary packaging label",
+    "Individual part tagging",
+    "Surcharge % on EXW price"
 ]
 
 # ------------------------- Order related columns ---------------------------------- # 
@@ -71,10 +74,13 @@ def cleanup_files():
     Process raw Excel files and create cleaned versions with separate sheets
     """
     files = os.listdir(FILES_FOLDER_LOCATION)
+    files2 = os.listdir("./files")
+
+    all_files = files + files2
     
-    for item in files: 
+    for item in all_files: 
         print("Processing excel sheet ---------------------------------------")
-        print(f"./files/{item}")
+        print(f"./files round 2/{item}")
 
         # Cleaned csv file name 
         cleaned_csv_file_name = f"{item.split('.')[0]}_cleaned.xlsx"
@@ -82,8 +88,15 @@ def cleanup_files():
         # Make sure folder exists or not 
         os.makedirs(CLEANED_FILES_FOLDER_LOCATION, exist_ok=True)
 
-        # Read all files in the directory
-        df = pd.read_excel(f"./files/{item}", sheet_name="4. Supply Chain Improv bidsheet")
+        try:
+            if item in files:
+                df = pd.read_excel(f"{FILES_FOLDER_LOCATION}/{item}", sheet_name="4. Supply Chain Improv bidsheet")
+            else:
+                df = pd.read_excel(f"./files/{item}", sheet_name="4. Supply Chain Improv bidsheet")
+
+        except Exception as e:
+            print(f"Failed to read sheet from {item}: {e}")
+            continue
 
         # Find the row containing "L #"
         lead_header_start_row_index = None
@@ -139,10 +152,10 @@ def cleanup_files():
             retails_header_end_row_index > retails_header_start_row_index
         ):
             # Extract header row
-            header_row = df.iloc[retails_header_start_row_index:retails_header_start_row_index + 1, 1:5]
+            header_row = df.iloc[retails_header_start_row_index:retails_header_start_row_index + 1, 1:8]
 
             # Skip the row after header, then take rest
-            data_rows = df.iloc[retails_header_start_row_index + 2:retails_header_end_row_index, 1:5]
+            data_rows = df.iloc[retails_header_start_row_index + 2:retails_header_end_row_index, 1:8]
 
             # Concatenate header + data
             retails_df = pd.concat([header_row, data_rows], ignore_index=True)
@@ -174,15 +187,17 @@ def cleanup_files():
             print("Order quantity section ('O#') not found.")
 
         # Save all three dataframes to the same Excel file
-        with pd.ExcelWriter(f"{CLEANED_FILES_FOLDER_LOCATION}/{cleaned_csv_file_name}", engine='openpyxl') as writer:
-            if lead_df is not None:
-                lead_df.to_excel(writer, index=False, header=False, sheet_name="lead_estimation")
-            if retails_df is not None:
-                retails_df.to_excel(writer, index=False, header=False, sheet_name="retails_packaging")
-            if order_quantity_df is not None:
-                order_quantity_df.to_excel(writer, index=False, header=False, sheet_name="order_quantity")
-
-        print(f"Cleaned file saved: {cleaned_csv_file_name}")
+        if any([lead_df is not None, retails_df is not None, order_quantity_df is not None]):
+            with pd.ExcelWriter(f"{CLEANED_FILES_FOLDER_LOCATION}/{cleaned_csv_file_name}", engine='openpyxl') as writer:
+                if lead_df is not None:
+                    lead_df.to_excel(writer, index=False, header=False, sheet_name="lead_estimation")
+                if retails_df is not None:
+                    retails_df.to_excel(writer, index=False, header=False, sheet_name="retails_packaging")
+                if order_quantity_df is not None:
+                    order_quantity_df.to_excel(writer, index=False, header=False, sheet_name="order_quantity")
+            print(f"✅ Cleaned file saved: {cleaned_csv_file_name}")
+        else:
+            print(f"⚠️ Skipping saving {cleaned_csv_file_name} - no valid sheets found")
 
 def get_sheet_column_config(sheet_name):
     """
@@ -213,9 +228,8 @@ def create_consolidated_dataset_rowwise(all_data, common_columns, supplier_colum
         
         # Extract supplier name
         try:
-            supplier_user_information = extract_supplier_name(file_name)
-            supplier_name = supplier_user_information[1] if len(supplier_user_information) > 1 else file_name
-            supplier_name = supplier_name.replace("_cleaned", "")
+            supplier_name = file_name.split('--')[-1].strip()
+            supplier_name = supplier_name.replace("_cleaned", "").replace(" R2", "").strip()
         except:
             supplier_name = file_name.replace("_cleaned", "")
         
@@ -390,13 +404,47 @@ def process_cleaned_files():
         os.makedirs(CONSOLIDATED_FILE_LOCATION, exist_ok=True)
         
         cleaned_files = os.listdir(CLEANED_FILES_FOLDER_LOCATION)
-        excel_files = [f for f in cleaned_files if f.endswith(('.xlsx', '.xls'))]
+        # Reading cleaned files related csv files 
+        from collections import defaultdict
 
-        if not excel_files:
-            print("No Excel files found in the cleaned files folder!")
-            return
-    
-        print(f"Found {len(excel_files)} Excel files to process")
+        cleaned_files = os.listdir(CLEANED_FILES_FOLDER_LOCATION)
+
+        # Group files by supplier name (normalized)
+        supplier_files = defaultdict(dict)
+        used_r1 = []
+        used_r2 = []
+
+        for f in cleaned_files:
+            if not f.endswith(('.xlsx', '.xls')):
+                continue
+
+            base = f.replace("_cleaned.xlsx", "")
+            is_r2 = "R2" in base
+
+            # Normalize supplier key (remove " R2" if present)
+            supplier_key = base.replace(" R2", "")
+
+            if is_r2:
+                supplier_files[supplier_key]['R2'] = f
+            else:
+                supplier_files[supplier_key]['R1'] = f
+
+        # Prefer R2 if available
+        excel_files = []
+        for supplier, files in supplier_files.items():
+            if files.get('R2'):
+                excel_files.append(files['R2'])
+                used_r2.append(supplier)
+            elif files.get('R1'):
+                excel_files.append(files['R1'])
+                used_r1.append(supplier)
+
+        print(f"\n✔️ Total unique suppliers considered: {len(supplier_files)}")
+        print(f"   - From R2: {len(used_r2)} suppliers")
+        print(f"   - From R1 (fallback): {len(used_r1)} suppliers")
+        missing_suppliers = set(supplier_files.keys()) - set(used_r1) - set(used_r2)
+        if missing_suppliers:
+            print(f"⚠️ Warning: {len(missing_suppliers)} suppliers had neither R1 nor R2: {missing_suppliers}")
 
         # Dictionary to store all sheet data
         all_sheet_data = {}
@@ -488,7 +536,7 @@ def process_cleaned_files():
 if __name__ == "__main__":
     # First clean up the raw files
     print("Starting file cleanup process...")
-    cleanup_files()
+    # cleanup_files()
     
     print("\nStarting consolidation process...")
     process_cleaned_files()

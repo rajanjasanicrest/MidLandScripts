@@ -1,9 +1,13 @@
+# === Master Consolidation File ====
+
+
 import re
 import numpy as np
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Alignment
+
 
 # === Step 1: Merge Files ===
 file_info = [
@@ -35,7 +39,7 @@ for file_path, metal_type in file_info:
 
 combined_df = pd.concat(dfs, axis=0, ignore_index=True)
 
-first_6 = dfs[0].columns[:5].tolist() + [('', 'type')]
+first_6 = dfs[0].columns[:5].tolist() + [('', 'type')]  
 last_3 = dfs[0].columns[-3:].tolist()
 middle = [col for col in combined_df.columns if col not in first_6 and col not in last_3]
 middle_sorted = sorted(middle, key=lambda x: (re.sub(r"_\d+$", "", x[0])))
@@ -113,76 +117,120 @@ for idx, row in df.iterrows():
 
 df["IQR_Value"] = iqr_values
 df["IQR_Value"] = df["IQR_Value"]
+
+mean_without_high_outliers = []
+
+for idx, row in df.iterrows():
+    bids = []
+    IQR = df.at[idx, "IQR_Value"]
+    values = row[target_cols].dropna()
+
+    for col in target_cols:
+        val = row[col]
+        if pd.isna(val) or float(val) == 0:
+            continue
+
+        val_float = float(val)
+
+        # Include if NOT a high outlier (i.e., val <= Q3 + 1.5*IQR)
+        if not outlier_mask.at[idx, col] or val_float <= values.quantile(0.75) + 1.5 * IQR:
+            bids.append(val_float)
+
+    if bids:
+        mean_val = round(sum(bids) / len(bids), 4)
+    else:
+        mean_val = ""
+
+    mean_without_high_outliers.append(mean_val)
+
+df["Arithmetic Average "] = mean_without_high_outliers
+
 output_file = "output_with_outliers.xlsx"
 
 
-# === Add Min Bid, Min Supplier, Outlier Flag, Min Bid excluding Outlier ===
+# === Add Min Bid, Min Supplier, Outlier Flag, Second Minimum Bid ===
 def extract_supplier(col_name):
     return str(col_name).split("-")[0].strip()
 
 min_bids = []
 min_suppliers = []
-min_bids_wo_outlier = []
-min_suppliers_wo_outlier = []
-
+second_min_bids = []
+second_min_suppliers = []
 has_outlier_flags = []
 
 for idx, row in df.iterrows():
     bids = {}
-    bids_wo_outlier = {}
-    has_outlier = False
+    outlier_bids = {}
+    valid_for_avg = []
+
+    IQR = row.get("IQR_Value", None)
 
     for col in target_cols:
         val = row[col]
         if pd.isna(val) or val == "" or float(val) == 0:
             continue
+
         supplier = extract_supplier(col)
         val_float = float(val)
         bids[supplier] = val_float
 
-        if not outlier_mask.at[idx, col]:
-            bids_wo_outlier[supplier] = val_float
-        else:
-            has_outlier = True
+        # Save all outliers
+        if outlier_mask.at[idx, col]:
+            outlier_bids[supplier] = val_float
 
-    # Get min bid and supplier
+        # Valid for average if:
+        # - Not a high outlier (i.e., value <= Q3 + 1.5*IQR)
+        # - Not 0 or NaN (already handled)
+        if IQR is not None:
+            Q3 = row[target_cols].dropna().astype(float).quantile(0.75)
+            upper = Q3 + 1.5 * IQR
+            if val_float <= upper:
+                valid_for_avg.append(val_float)
+        else:
+            valid_for_avg.append(val_float)  # fallback
+
+    # --- Min and Second Min Logic ---
     if bids:
-        min_bid = min(bids.values())
-        min_supplier = [k for k, v in bids.items() if v == min_bid][0]
+        sorted_bids = sorted(bids.items(), key=lambda x: x[1])
+        min_supplier, min_bid = sorted_bids[0]
+        if len(sorted_bids) > 1:
+            second_min_supplier, second_min_bid = sorted_bids[1]
+        else:
+            second_min_supplier = ""
+            second_min_bid = ""
     else:
         min_bid = ""
         min_supplier = ""
+        second_min_bid = ""
+        second_min_supplier = ""
 
-    # Get min bid (no outlier) and supplier
-    if bids_wo_outlier:
-        min_bid_wo = min(bids_wo_outlier.values())
-        min_supplier_wo = [k for k, v in bids_wo_outlier.items() if v == min_bid_wo][0]
-    else:
-        min_bid_wo = ""
-        min_supplier_wo = ""
+    # --- Has lower-end outlier logic ---
+    has_lower_outlier = any(
+        supplier in outlier_bids and outlier_bids[supplier] == min_bid
+        for supplier in outlier_bids
+    )
 
+    # Append everything
     min_bids.append(min_bid)
     min_suppliers.append(min_supplier)
-    min_bids_wo_outlier.append(min_bid_wo)
-    min_suppliers_wo_outlier.append(min_supplier_wo)
-    has_outlier_flags.append("Yes" if has_outlier else "No")
+    second_min_bids.append(second_min_bid)
+    second_min_suppliers.append(second_min_supplier)
+    has_outlier_flags.append("Yes" if has_lower_outlier else "No")
 
 # Assign to dataframe
 df["Min Bid"] = min_bids
 df["Min Supplier"] = min_suppliers
 df["Has Outlier"] = has_outlier_flags
-df["Min Bid (No Outlier)"] = min_bids_wo_outlier
-df["Min Supplier (No Outlier)"] = min_suppliers_wo_outlier
-
+df["2nd Lowest Minimum Bid"] = second_min_bids
+df["2nd Lowest Minimum Bid Supplier"] = second_min_suppliers
 
 cols = df.columns.tolist()
 try:
     idx = cols.index("Valid Supplier")
-    new_cols = cols[:idx+1] + ["Min Bid", "Min Supplier", "Has Outlier", "Min Bid (No Outlier)", "Min Supplier (No Outlier)"] + [c for c in cols if c not in cols[:idx+1] + ["Min Bid", "Min Supplier", "Has Outlier", "Min Bid (No Outlier)", "Min Supplier (No Outlier)"]]
+    new_cols = cols[:idx+1] + ["Min Bid", "Min Supplier", "Has Outlier", "2nd Lowest Minimum Bid", "2nd Lowest Minimum Bid Supplier"] + [c for c in cols if c not in cols[:idx+1] + ["Min Bid", "Min Supplier", "Has Outlier", "2nd Lowest Minimum Bid", "2nd Lowest Minimum Bid Supplier"]]
     df = df[new_cols]
 except ValueError:
     pass
-
 
 
 df = df.replace({np.nan: ""})
@@ -208,9 +256,9 @@ for i, col in enumerate(df.columns):
             if outlier_mask.iloc[j, target_cols.index(col)] and df.iloc[j, i] != 0:
                 ws[f"{col_letter}{j + 2}"].fill = orange_fill
 
-# Last 4 columns → Yellow
-last_4_col_indices = range(len(headers) - 4, len(headers))
-for col_idx in last_4_col_indices:
+# Last 5 columns → Yellow
+last_5_col_indices = range(len(headers) - 5, len(headers))
+for col_idx in last_5_col_indices:
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=col_idx + 1, max_col=col_idx + 1):
         for cell in row:
             cell.fill = yellow_fill
@@ -248,15 +296,15 @@ for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max
 # Loop from column 13 (G) to total_cols
 total_cols = ws.max_column
 
-for col_idx, header in enumerate(headers[13:], start=13):
-    is_last_four = col_idx >= total_cols - 4  # Check if current col is one of the last 4
+for col_idx, header in enumerate(headers[20:], start=20):
+    is_last_five = col_idx >= total_cols - 5  # Check if current col is one of the last 4
 
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=col_idx + 1, max_col=col_idx + 1):
         for cell in row:
             if isinstance(cell.value, (int, float)):
                 cell.number_format = '0.0000'
             elif cell.value is None or cell.value == '':
-                if is_last_four:
+                if is_last_five:
                     cell.value = '-'
                 else:
                     cell.value = 0.0000
