@@ -98,6 +98,12 @@ candidate_new_supplier_parts = []  # Eligible for threshold assignment
 net_new_supplier_list = set()
 total_cost_not_awarded = 0
 
+MANEK_EXTRA_VOLUME = 0
+PUSHTI_EXTRA_VOLUME = 0
+FALCON_EXTRA_VOLUME = 0
+FALCON_MANEK = 0
+FALCON_BRASS = 0
+
 for idx, row in df.iterrows():
     incumbent = row.get(incumbent_col)
     min_supplier = row.get("Final Minimum Bid Landed Supplier")
@@ -151,19 +157,101 @@ for idx, row in df.iterrows():
             volume = pd.to_numeric(row.get(volume_col), errors='coerce')
             extended_cost = landed_cost * volume
             savings_usd = row.get(f"{min_supplier} - Final Landed USD savings vs baseline", 0)
-            try:
-                savings_usd = float(savings_usd)
-            except:
-                savings_usd = 0
-            candidate_new_supplier_parts.append({
-                "index": idx,
-                "row": row,
-                "extended_cost": extended_cost,
-                "savings_usd": savings_usd,
-                "min_supplier": min_supplier,
-                "incumbent": incumbent,
-                "reason": "Incumbent bid, but not lowest; eligible for new supplier assignment"
-            })
+
+            has_incumbent_bid = pd.notna(incumbent_bid_val) and incumbent_bid_val > 0
+
+            if ((min_supplier == 'Pushti Metal' and PUSHTI_EXTRA_VOLUME <= 1000000) or (min_supplier == 'Manek Metalcraft' and MANEK_EXTRA_VOLUME <= 8000000) or (min_supplier == 'Falcon Components')) and incumbent in ['Mayank', 'Brass Pro Industrial'] :
+
+                if min_supplier in ['Manek Metalcraft', 'Pushti Metal']:
+                    if incumbent == 'Mayank':
+                        if min_supplier == 'Manek Metalcraft':
+                            reason = "Incumbent Supplier Mayank prefered over Manek MetalCraft"
+                        elif min_supplier == 'Pushti Metal':
+                            reason = "Incumbent Supplier Mayank prefered over Pushti Metal"
+                        elif min_supplier == 'Falcon Components':
+                            reason = "Incumbent Supplier Mayank prefered over Falcon Components"
+                        incumbent_retained_parts.append({
+                            "index": idx,
+                            "row": row,
+                            "incumbent": incumbent,
+                            "reason": reason
+                        })
+                        if min_supplier == 'Manek Metalcraft':
+                            MANEK_EXTRA_VOLUME += row.get('Annual Volume (per UOM)')
+                        elif min_supplier == 'Pushti Metal':
+                            PUSHTI_EXTRA_VOLUME += row.get('Annual Volume (per UOM)')
+                        elif min_supplier == 'Falcon Components':
+                            FALCON_EXTRA_VOLUME += row.get('Annual Volume (per UOM)')
+
+                    elif incumbent == 'Brass Pro Industrial':
+                        if min_supplier == 'Manek Metalcraft':
+                            reason = "Incumbent Supplier Brass Pro Industrial prefered over Manek MetalCraft"
+                        elif min_supplier == 'Pushti Metal':
+                            reason = "Incumbent Supplier Brass Pro Industrial prefered over Pushti Metal"
+                        elif min_supplier == 'Falcon Components':
+                            reason = "Incumbent Supplier Brass Pro Industrial prefered over Falcon Components"
+                        incumbent_retained_parts.append({
+                            "index": idx,
+                            "row": row,
+                            "incumbent": incumbent,
+                            "reason": reason
+                        })
+                        if min_supplier == 'Manek Metalcraft':
+                            MANEK_EXTRA_VOLUME += row.get('Annual Volume (per UOM)')
+                        elif min_supplier == 'Pushti Metal':
+                            PUSHTI_EXTRA_VOLUME += row.get('Annual Volume (per UOM)')
+                        elif min_supplier == 'Falcon Components':
+                            FALCON_EXTRA_VOLUME += row.get('Annual Volume (per UOM)')
+
+                    else:
+                        try:
+                            savings_usd = float(savings_usd)
+                        except:
+                            savings_usd = 0
+                        candidate_new_supplier_parts.append({
+                            "index": idx,
+                            "row": row,
+                            "extended_cost": extended_cost,
+                            "savings_usd": savings_usd,
+                            "min_supplier": min_supplier,
+                            "incumbent": incumbent,
+                            "reason": "Incumbent bid, but not lowest; eligible for new supplier assignment"
+                        })
+                
+                else:
+
+                    if incumbent == 'Mayank' and FALCON_MANEK <= 500000:
+                        reason = "Incumbent Supplier Mayank prefered over Falcon Components"
+                        incumbent_retained_parts.append({
+                            "index": idx,
+                            "row": row,
+                            "incumbent": incumbent,
+                            "reason": reason
+                        })
+                        FALCON_MANEK += row.get('Annual Volume (per UOM)')
+                    elif incumbent == 'Brass Pro Industrial' and FALCON_BRASS <= 500000:
+                        reason = "Incumbent Supplier Brass Pro Industrial prefered over Falcon Components"
+                        incumbent_retained_parts.append({
+                            "index": idx,
+                            "row": row,
+                            "incumbent": incumbent,
+                            "reason": reason
+                        })
+                        FALCON_BRASS += row.get('Annual Volume (per UOM)')
+                    else:
+                        try:
+                            savings_usd = float(savings_usd)
+                        except:
+                            savings_usd = 0
+                        candidate_new_supplier_parts.append({
+                            "index": idx,
+                            "row": row,
+                            "extended_cost": extended_cost,
+                            "savings_usd": savings_usd,
+                            "min_supplier": min_supplier,
+                            "incumbent": incumbent,
+                            "reason": "Incumbent bid, but not lowest; eligible for new supplier assignment"
+                        })
     else:
         # Incumbent did not bid, but minimum bid exists (should already be handled above)
         pass
@@ -693,7 +781,7 @@ for row in output_data:
         supplier_awarded_amounts[supplier] += awarded_amount
 
 # Dynamically identify tail suppliers (those with <$100k total awarded)
-tail_suppliers_to_rationalize = ['Giraffe Stainless', 'Union Metal Products', 'WEFLO', 'Kaixuan Stainless Steel', 'Tianjin Outshine', 'Sichuan Y&J', 'Guangzhou Hopetrol', 'Swati Enterprise']
+tail_suppliers_to_rationalize = ['Giraffe Stainless', 'Union Metal Products', 'WEFLO',  'Tianjin Outshine', 'Sichuan Y&J', 'Guangzhou Hopetrol', ]
 # Identify suppliers with ≥$100k awards (eligible to receive rationalized parts)
 large_suppliers = {supplier: amount for supplier, amount in supplier_awarded_amounts.items() 
                   if amount >= 100000}
@@ -1437,7 +1525,7 @@ summary_data = [
 
 ]
 
-output_file = 'scenario3_40 tweaks-3.xlsx'
+output_file = 'scenario3_40 tweaks-6.xlsx'
 
 # --- Write to Excel ---
 with pd.ExcelWriter(output_file, engine="xlsxwriter") as writer:
@@ -1460,9 +1548,8 @@ with pd.ExcelWriter(output_file, engine="xlsxwriter") as writer:
     summary_row = 2
 
     # Grouped indices
-    cost_metrics = summary_data[0:5]
-    supplier_metrics = summary_data[5:15]
-    volume_metrics = summary_data[15:]
+    cost_metrics = summary_data[0:4]
+    supplier_metrics = summary_data[4:15]
 
     # Write cost metrics: Columns A & B
     for i, item in enumerate(cost_metrics):
@@ -1475,7 +1562,7 @@ with pd.ExcelWriter(output_file, engine="xlsxwriter") as writer:
         worksheet.write(summary_row + i, 4, item[1])
 
     # --- Write total evaluated cost row ---
-    total_label_row = summary_row + max(len(cost_metrics), len(supplier_metrics), len(volume_metrics)) + 1
+    total_label_row = summary_row + max(len(cost_metrics), len(supplier_metrics)) + 1
     worksheet.write(total_label_row, 0, "Total Landed Cost Evaluated", bold_format)
 
     # Formula for summing cost values (adjust B3:B8 if more/less than 6 rows of cost)
