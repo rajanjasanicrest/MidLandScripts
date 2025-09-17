@@ -1,9 +1,9 @@
 import pandas as pd
 
 # === CONFIGURATION ===
-excel_file_path = "new/Bidsheet Master Consolidate Landed3.xlsx"
+excel_file_path = "new/Bidsheet Master Consolidate Landed v_t_2.xlsx"
 sheet_name = "Sheet1"
-csv_output_path = "new/Bidsheet Master Consolidate Landed3.csv"
+csv_output_path = "new/Bidsheet Master Consolidate Landed v_t_2.csv"
 
 # === CONVERSION ===
 print(f"Reading Excel file: {excel_file_path}")

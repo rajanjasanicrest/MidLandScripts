@@ -184,23 +184,14 @@ for idx, row in df.iterrows():
                             FALCON_EXTRA_VOLUME += row.get('Annual Volume (per UOM)')
 
                     elif incumbent == 'Brass Pro Industrial':
-                        if min_supplier == 'Manek Metalcraft':
-                            reason = "Incumbent Supplier Brass Pro Industrial prefered over Manek MetalCraft"
-                        elif min_supplier == 'Pushti Metal':
-                            reason = "Incumbent Supplier Brass Pro Industrial prefered over Pushti Metal"
-                        elif min_supplier == 'Falcon Components':
+                        if min_supplier == 'Falcon Components':
                             reason = "Incumbent Supplier Brass Pro Industrial prefered over Falcon Components"
-                        incumbent_retained_parts.append({
-                            "index": idx,
-                            "row": row,
-                            "incumbent": incumbent,
-                            "reason": reason
-                        })
-                        if min_supplier == 'Manek Metalcraft':
-                            MANEK_EXTRA_VOLUME += row.get('Annual Volume (per UOM)')
-                        elif min_supplier == 'Pushti Metal':
-                            PUSHTI_EXTRA_VOLUME += row.get('Annual Volume (per UOM)')
-                        elif min_supplier == 'Falcon Components':
+                            incumbent_retained_parts.append({
+                                "index": idx,
+                                "row": row,
+                                "incumbent": incumbent,
+                                "reason": reason
+                            })
                             FALCON_EXTRA_VOLUME += row.get('Annual Volume (per UOM)')
 
                     else:
@@ -252,6 +243,21 @@ for idx, row in df.iterrows():
                             "incumbent": incumbent,
                             "reason": "Incumbent bid, but not lowest; eligible for new supplier assignment"
                         })
+            else:
+                try:
+                    savings_usd = float(savings_usd)
+                except:
+                    savings_usd = 0
+                candidate_new_supplier_parts.append({
+                    "index": idx,
+                    "row": row,
+                    "extended_cost": extended_cost,
+                    "savings_usd": savings_usd,
+                    "min_supplier": min_supplier,
+                    "incumbent": incumbent,
+                    "reason": "Incumbent bid, but not lowest; eligible for new supplier assignment"
+                })
+
     else:
         # Incumbent did not bid, but minimum bid exists (should already be handled above)
         pass
@@ -416,7 +422,7 @@ def calculate_annual_revenue_discounts():
             
         # Get FOB cost column
         fob_col = f"{selected_supplier} - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)"
-        fob_cost_per_uom = row.get(fob_col, 0)
+        fob_cost_per_uom = row.get(fob_col, 0)  
         
         if pd.isna(fob_cost_per_uom):
             fob_cost_per_uom = 0
@@ -538,6 +544,7 @@ for decision in tqdm(decision_rows, total=len(decision_rows), desc="Finalizing")
             "Incumbent Supplier": incumbent,
             "Selected Supplier": incumbent,
             "Annual Volume (per UOM)": row.get("Annual Volume (per UOM)"),
+            "Final quote per each FOB Port of Departure (USD)": row.get(f"{incumbent} - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)", 0),
             "FOB Savings %": "-",
             "FOB Savings USD": "-",
             "Landed Cost Savings %": "-",
@@ -553,7 +560,8 @@ for decision in tqdm(decision_rows, total=len(decision_rows), desc="Finalizing")
             "New product introduction": get_ref_value("New product introduction"),
             "Long term commitment rebate": get_ref_value("Long term commitment rebate"),
             "Uncompetitive supplier behavior": get_ref_value("Uncompetitive supplier behavior"),
-            "valid_supplier_count": row.get('Valid Supplier')
+            "valid_supplier_count": row.get('Valid Supplier'),
+            "Annual revenue discount USD": annual_discount,
         }
         output_data.append(output_row)
         continue
@@ -562,7 +570,6 @@ for decision in tqdm(decision_rows, total=len(decision_rows), desc="Finalizing")
     # to ensure accuracy after any supplier reassignments
 
     output_row = {
-        "Annual revenue discount USD": annual_discount,
         "ROW ID #": row.get("ROW ID #"),
         "Division": row.get("Division"),
         "Part #": row.get("Part #"),
@@ -572,6 +579,7 @@ for decision in tqdm(decision_rows, total=len(decision_rows), desc="Finalizing")
         "Incumbent Supplier": row.get("Normalized incumbent supplier"),
         "Selected Supplier": selected_supplier,
         "Annual Volume (per UOM)": row.get('Annual Volume (per UOM)'),
+        "Final quote per each FOB Port of Departure (USD)": row.get(f"{selected_supplier} - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)", 0),
         "FOB Savings %": row.get(pct_col, "-"),
         "FOB Savings USD": row.get(usd_col, "-"),
         "Landed Cost Savings %": row.get(landed_pct_col, "-"),
@@ -586,7 +594,8 @@ for decision in tqdm(decision_rows, total=len(decision_rows), desc="Finalizing")
         "New product introduction": get_ref_value("New product introduction"),
         "Long term commitment rebate": get_ref_value("Long term commitment rebate"),
         "Uncompetitive supplier behavior": get_ref_value("Uncompetitive supplier behavior"),
-        "valid_supplier_count": row.get('Valid Supplier')
+        "valid_supplier_count": row.get('Valid Supplier'),
+        "Annual revenue discount USD": annual_discount,
     }
     output_data.append(output_row)
 
@@ -602,12 +611,14 @@ binzhou_reassignments = 0
 #     "DDSL-4040-A1",
 # ]
 binzhou_zeli_exclusion_parts = [
-    "CDCSL-200-A1", "CDCSL-300-A1", "CDCSL-400-A1", "CDCSL-600-A1",
-    "CGBSL-300-A1", "CGBSL-400-A1", "CGCSL-200CR-A1", "CGCSL-300CR-A1",
-    "CGCSL-400CR-A1", "CGCSL-600CR-A1", "CGDSL-200-A1", "CGDSL-300-A1",
-    "CGDSL-400-A1", "CGDSL-600-A1", "DASL-3020-A1", "DASL-3040-A1",
-    "DASL-4030-A1", "DASL-6040-A1", "DDSL-2020-A1", "DDSL-3030-A1",
-    "DDSL-4040-A1", "DASL-2030-A1", "CGBSL-200-A1"
+    "CGBSL-200-A1","CGDSL-200-A1","CGCSL-200CR-A1","CDCSL-200-A1",
+    "CDCSL-300-A1","CGBSL-300-A1","CGDSL-300-A1","CGCSL-300CR-A1",
+    "CGBSL-400-A1","CGDSL-400-A1","CDCSL-400-A1","CDCSL-200-SS1",
+    "CGCSL-400CR-A1","CGBSL-200-SS1","CGCSL-200CR-SS1","CGDSL-200-SS1",
+    "CDCSL-600-A1","CDCSL-300-SS1","CGDSL-600-A1","CGBSL-300-SS1",
+    "CGCSL-600CR-A1","CGDSL-300-SS1","CGCSL-300CR-SS1","CDCSL-400-SS1",
+    "CGBSL-400-SS1","CGDSL-400-SS1","CGCSL-400CR-SS1","CDCSL-600-SS1",
+    "CGBSL-600-SS1","CGDSL-600-SS1","CGCSL-600CR-SS1"
 ]
 
 print(f"Binzhou Zeli exclusion applies to {len(binzhou_zeli_exclusion_parts)} specific part numbers")
@@ -697,7 +708,10 @@ for i, row in enumerate(output_data):
                     usd_col = f"{new_supplier} - Final USD savings vs baseline"
                     landed_pct_col = f"{new_supplier} - Final Landed % savings vs baseline"
                     landed_usd_col = f"{new_supplier} - Final Landed USD savings vs baseline"
+                    fob_col = f"{new_supplier} - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)"
                     
+                    
+                    output_data[i]["Final quote per each FOB Port of Departure (USD)"] = df_row.get(fob_col, "-")
                     output_data[i]["FOB Savings %"] = df_row.get(pct_col, "-")
                     output_data[i]["FOB Savings USD"] = df_row.get(usd_col, "-")
                     output_data[i]["Landed Cost Savings %"] = df_row.get(landed_pct_col, "-")
@@ -781,7 +795,8 @@ for row in output_data:
         supplier_awarded_amounts[supplier] += awarded_amount
 
 # Dynamically identify tail suppliers (those with <$100k total awarded)
-tail_suppliers_to_rationalize = ['Giraffe Stainless', 'Union Metal Products', 'WEFLO',  'Tianjin Outshine', 'Sichuan Y&J', 'Guangzhou Hopetrol', ]
+tail_suppliers_to_rationalize = ['Giraffe Stainless', 'Union Metal Products', 'WEFLO', 'Kaixuan Stainless Steel', 'Tianjin Outshine', 'Sichuan Y&J', 'Guangzhou Hopetrol', 'Swati Enterprise']
+# tail_suppliers_to_rationalize = ['Giraffe Stainless', 'Union Metal Products', 'WEFLO', 'Tianjin Outshine', 'Sichuan Y&J', 'Guangzhou Hopetrol', 'Swati Enterprise']
 # Identify suppliers with ≥$100k awards (eligible to receive rationalized parts)
 large_suppliers = {supplier: amount for supplier, amount in supplier_awarded_amounts.items() 
                   if amount >= 100000}
@@ -871,7 +886,10 @@ for i, row in enumerate(output_data):
                     usd_col = f"{new_supplier} - Final USD savings vs baseline"
                     landed_pct_col = f"{new_supplier} - Final Landed % savings vs baseline"
                     landed_usd_col = f"{new_supplier} - Final Landed USD savings vs baseline"
+                    fob_col = f"{new_supplier} - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)"
                     
+                    output_data[i]["Final quote per each FOB Port of Departure (USD)"] = df_row.get(fob_col, "-")
+
                     output_data[i]["FOB Savings %"] = df_row.get(pct_col, "-")
                     output_data[i]["FOB Savings USD"] = df_row.get(usd_col, "-")
                     output_data[i]["Landed Cost Savings %"] = df_row.get(landed_pct_col, "-")
@@ -1162,6 +1180,7 @@ updated_data = [
     "Selected Supplier": "Eaglelite",
     "Part bid on (yes/no)": "Yes",
     "Part #": "SR-800-SP",
+    "Eaglelite - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 49.17,
     "Extended baseline landed cost USD": 12217,
     "Landed Cost Savings USD": -3484,
     "Landed Extended Cost USD": 15701,
@@ -1172,6 +1191,7 @@ updated_data = [
     "row_id": 5347,
     "Incumbent Supplier": "Yuhuan Aigema Copper",
     "Selected Supplier": "Manek Metalcraft",
+    "Manek Metalcraft - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 0.2857,
     "Part bid on (yes/no)": "Yes",
     "Part #": "34732",
     "Extended baseline landed cost USD": 9359,
@@ -1184,6 +1204,7 @@ updated_data = [
     "row_id": 8462,
     "Incumbent Supplier": "PT Ever Age",
     "Selected Supplier": "Meide Group",
+    "Meide Group - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 155.9976,
     "Part bid on (yes/no)": "Yes",
     "Part #": "942185",
     "Extended baseline landed cost USD": 3141,
@@ -1196,6 +1217,7 @@ updated_data = [
     "row_id": 8664,
     "Incumbent Supplier": "PT Ever Age",
     "Selected Supplier": "Meide Group",
+    "Meide Group - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 23.4954,
     "Part bid on (yes/no)": "Yes",
     "Part #": "970314",
     "Extended baseline landed cost USD": 1986,
@@ -1208,6 +1230,7 @@ updated_data = [
     "row_id": 11774,
     "Incumbent Supplier": "PT Ever Age",
     "Selected Supplier": "Meide Group",
+    "Meide Group - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 17.608,
     "Part bid on (yes/no)": "Yes",
     "Part #": "9691212CTSLF",
     "Extended baseline landed cost USD": 1190,
@@ -1220,6 +1243,7 @@ updated_data = [
     "row_id": 12440,
     "Incumbent Supplier": "PT Ever Age",
     "Selected Supplier": "Meide Group",
+    "Meide Group - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 33.6268,
     "Part bid on (yes/no)": "Yes",
     "Part #": "940137X",
     "Extended baseline landed cost USD": 1679,
@@ -1232,6 +1256,7 @@ updated_data = [
     "row_id": 12312,
     "Incumbent Supplier": "TANGSHAN HONGYOU CERAMICS",
     "Selected Supplier": "WEFLO",
+    "WEFLO - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 28.35,
     "Part bid on (yes/no)": "Yes",
     "Part #": "BFVGE-200",
     "Extended baseline landed cost USD": 3005,
@@ -1244,6 +1269,7 @@ updated_data = [
     "row_id": 12461,
     "Incumbent Supplier": "TANGSHAN HONGYOU CERAMICS",
     "Selected Supplier": "WEFLO",
+    "WEFLO - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 44.1,
     "Part bid on (yes/no)": "Yes",
     "Part #": "BFVGE-300",
     "Extended baseline landed cost USD": 3211,
@@ -1256,6 +1282,7 @@ updated_data = [
     "row_id": 12462,
     "Incumbent Supplier": "TANGSHAN HONGYOU CERAMICS",
     "Selected Supplier": "WEFLO",
+    "WEFLO - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 91.875,
     "Part bid on (yes/no)": "Yes",
     "Part #": "BFVGH-600-NBR",
     "Extended baseline landed cost USD": 4222,
@@ -1268,6 +1295,7 @@ updated_data = [
     "row_id": 12514,
     "Incumbent Supplier": "TANGSHAN HONGYOU CERAMICS",
     "Selected Supplier": "WEFLO",
+    "WEFLO - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 91.875,
     "Part bid on (yes/no)": "Yes",
     "Part #": "BFVGE-600",
     "Extended baseline landed cost USD": 5999,
@@ -1280,6 +1308,7 @@ updated_data = [
     "row_id": 12515,
     "Incumbent Supplier": "TANGSHAN HONGYOU CERAMICS",
     "Selected Supplier": "WEFLO",
+    "WEFLO - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 147,
     "Part bid on (yes/no)": "Yes",
     "Part #": "BFVGH-800-NBR",
     "Extended baseline landed cost USD": 5081,
@@ -1291,7 +1320,8 @@ updated_data = [
   {
     "row_id": 13397,
     "Incumbent Supplier": "TANGSHAN HONGYOU CERAMICS",
-    "Selected Supplier": "WEFLO",
+    "Selected Supplier": "WEFLO", 
+    "WEFLO - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 28.35,
     "Part bid on (yes/no)": "Yes",
     "Part #": "BFVGH-200-NBR",
     "Extended baseline landed cost USD": 750,
@@ -1304,6 +1334,7 @@ updated_data = [
     "row_id": 8659,
     "Incumbent Supplier": "PT Ever Age",
     "Selected Supplier": "West Legend-MTD",
+    "West Legend-MTD - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 2.521,
     "Part bid on (yes/no)": "Yes",
     "Part #": "970303",
     "Extended baseline landed cost USD": 8143,
@@ -1316,6 +1347,7 @@ updated_data = [
     "row_id": 8661,
     "Incumbent Supplier": "PT Ever Age",
     "Selected Supplier": "West Legend-MTD",
+    "West Legend-MTD - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 3.839,
     "Part bid on (yes/no)": "Yes",
     "Part #": "970305",
     "Extended baseline landed cost USD": 6946,
@@ -1328,6 +1360,7 @@ updated_data = [
     "row_id": 8666,
     "Incumbent Supplier": "PT Ever Age",
     "Selected Supplier": "West Legend-MTD",
+    "West Legend-MTD - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 8.828,
     "Part bid on (yes/no)": "Yes",
     "Part #": "970331",
     "Extended baseline landed cost USD": 14915,
@@ -1340,6 +1373,7 @@ updated_data = [
     "row_id": 8651,
     "Incumbent Supplier": "PT Ever Age",
     "Selected Supplier": "Zhejiang Acme",
+    "Zhejiang Acme - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 13.849,
     "Part bid on (yes/no)": "Yes",
     "Part #": "970208",
     "Extended baseline landed cost USD": 7749,
@@ -1352,6 +1386,7 @@ updated_data = [
     "row_id": 8656,
     "Incumbent Supplier": "PT Ever Age",
     "Selected Supplier": "Zhejiang Acme",
+    "Zhejiang Acme - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 3.184,
     "Part bid on (yes/no)": "Yes",
     "Part #": "970254",
     "Extended baseline landed cost USD": 27459,
@@ -1364,6 +1399,7 @@ updated_data = [
     "row_id": 9949,
     "Incumbent Supplier": "PT Ever Age",
     "Selected Supplier": "Zhejiang Acme",
+    "Zhejiang Acme - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 1.3176,
     "Part bid on (yes/no)": "Yes",
     "Part #": "44841LF",
     "Extended baseline landed cost USD": 2079,
@@ -1376,6 +1412,7 @@ updated_data = [
     "row_id": 5893,
     "Incumbent Supplier": "Yuhuan Aigema Copper",
     "Selected Supplier": "ZHEJIANG WANDEKAI",
+    "ZHEJIANG WANDEKAI - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)": 1.1528,
     "Part bid on (yes/no)": "Yes",
     "Part #": "46931",
     "Extended baseline landed cost USD": 25388,
@@ -1411,6 +1448,10 @@ for update in updated_data:
         usd_col = f"{selected_supplier} - Final USD savings vs baseline"
         landed_pct_col = f"{selected_supplier} - Final Landed % savings vs baseline"
         landed_usd_col = f"{selected_supplier} - Final Landed USD savings vs baseline"
+
+        fob_col = f"{selected_supplier} - R2 - Total Cost Per UOM FOB Port of Origin/Departure (USD)"                    
+        output_df.at[idx, "Final quote per each FOB Port of Departure (USD)"] = update[fob_col] if fob_col in update else "-"
+
         output_df.at[idx, "FOB Savings %"] = output_df.at[idx, pct_col] if pct_col in output_df.columns else "-"
         output_df.at[idx, "FOB Savings USD"] = output_df.at[idx, usd_col] if usd_col in output_df.columns else "-"
         output_df.at[idx, "Landed Cost Savings %"] = output_df.at[idx, landed_pct_col] if landed_pct_col in output_df.columns else "-"
@@ -1525,7 +1566,7 @@ summary_data = [
 
 ]
 
-output_file = 'scenario3_40 tweaks-6.xlsx'
+output_file = 'scenario3_40 tweaks-6 new.xlsx'
 
 # --- Write to Excel ---
 with pd.ExcelWriter(output_file, engine="xlsxwriter") as writer:
